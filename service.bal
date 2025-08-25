@@ -80,4 +80,12 @@ service /payment\-service on new http:Listener(9090) {
         
         return response;
     }
+
+    resource function get health(http:Request request) returns Response {
+        Response response = {
+            statusCode: 200
+        };
+        
+        return response;
+    }
 }
