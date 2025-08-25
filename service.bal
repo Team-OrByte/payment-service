@@ -11,6 +11,13 @@ stripe:ConnectionConfig configuration = {
 
 stripe:Client stripeClient = check new (configuration);
 
+@http:ServiceConfig {
+    cors: {
+        allowOrigins: ["*"],
+        allowMethods: ["POST", "PUT", "GET", "POST", "OPTIONS"],
+        allowHeaders: ["Content-Type", "Access-Control-Allow-Origin", "X-Service-Name"]
+    }
+}
 service /payment\-service on new http:Listener(9090) {
 
     resource function get create\-payment(http:Request request) returns Response|error {
