@@ -1,29 +1,24 @@
 services:
-  # bike-service-db:
-  #   image: postgres:15
-  #   container_name: bike_service_db
-  #   restart: unless-stopped
-  #   environment:
-  #     POSTGRES_DB: bikes_db
-  #     POSTGRES_USER: bike_service_user
-  #     POSTGRES_PASSWORD: 1KiHEb8LC0VmvUe
-  #   volumes:
-  #     - pgdata:/var/lib/postgresql/data
-  #     - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
-  #   ports:
-  #     - '5432:5432'
-  #   healthcheck:
-  #     test: ['CMD-SHELL', 'pg_isready -U bike_service_user -d bikes_db']
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
+  payment_service_mongodb:
+    image: mongo:7.0
+    container_name: payment-service-mongodb
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: payment-service-db-user
+      MONGO_INITDB_ROOT_PASSWORD: dbinitPASSWORD001axi00
+      MONGO_INITDB_DATABASE: payment-service-db
+    volumes:
+      - payment_mongodb_data:/data/db
+      - ./db/init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
 
   payment-service:
     build: .
     container_name: payment_service
     restart: unless-stopped
     depends_on:
-      bike-service-db:
+      payment_service_mongodb:
         condition: service_started
     ports:
       - '8090:8090'
@@ -39,3 +34,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+volumes:
+  payment_mongodb_data:
+  payment_service_logs:

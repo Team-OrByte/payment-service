@@ -1,9 +1,31 @@
 import ballerina/http;
 import ballerinax/stripe;
+import ballerinax/mongodb;
 
 configurable string stripeSecretKey = ?;
 configurable string successRedirectUrl = ?;
 configurable string cancelRedirectUrl = ?;
+
+configurable string host = ?;
+configurable int port = ?;
+configurable string username = ?;
+configurable string password = ?;
+configurable string database = ?;
+configurable string collection = ?;
+
+final mongodb:Client mongoClient = check new ({
+    connection: {
+        serverAddress: {
+            host,
+            port
+        },
+        auth: <mongodb:ScramSha256AuthCredential>{
+            username,
+            password,
+            database
+        }
+    }
+});
 
 stripe:ConnectionConfig configuration = {
     auth: {
@@ -21,6 +43,12 @@ stripe:Client stripeClient = check new (configuration);
     }
 }
 service /payment\-service on new http:Listener(9090) {
+
+    private final mongodb:Database moviesDb;
+
+    function init() returns error? {
+        self.moviesDb = check mongoClient->getDatabase(collection);
+    }
 
     resource function get create\-payment(http:Request request) returns Response|error {
         // Create a checkout session for frontend integration
