@@ -91,75 +91,87 @@ service /payment\-service on new http:Listener(9090) {
 
     // 2. Stripe Webhook (actual status comes here)
     resource function post webhook(http:Caller caller, http:Request req) returns error? {
-        json|error payload = req.getJsonPayload();
-        if payload is error {
-            check caller->respond({ statusCode: 400, message: "Invalid payload" });
+        StripeWebhookPayload|error webhookPayload = self.parseWebhookPayload(req);
+        if webhookPayload is error {
+            check caller->respond({ statusCode: 400, message: "Invalid webhook payload" });
             return;
         }
 
-        io:println("Webhook event received: ", payload.toJsonString());
+        io:println("Webhook event received: ", webhookPayload.eventType);
 
-        json eventTypeJson = check payload.'type;
-        string eventType = eventTypeJson.toString();
-
-        json dataJson = check payload.data;
-        json dataObject = check dataJson.'object;
-
-        if eventType == "checkout.session.completed" {
-            json sessionIdJson = check dataObject.id;
-            string sessionId = sessionIdJson.toString();
-            io:println("Checkout session completed. Session ID: ", sessionId);
-
-            mongodb:Update update = {
-                set: { "status": SUCCEEDED }
-            };
-            _ = check self.paymentCollection->updateOne({ "stripeSessionId": sessionId }, update);
-
-        } else if eventType == "checkout.session.expired" {
-            json sessionIdJson = check dataObject.id;
-            string sessionId = sessionIdJson.toString();
-            io:println("Checkout session expired. Session ID: ", sessionId);
-
-            mongodb:Update update = {
-                set: { "status": EXPIRED }
-            };
-            _ = check self.paymentCollection->updateOne({ "stripeSessionId": sessionId }, update);
-
-        } else if eventType == "payment_intent.succeeded" {
-            json intentIdJson = check dataObject.id;
-            string intentId = intentIdJson.toString();
-            io:println("Payment intent succeeded. Intent ID: ", intentId);
-
-            mongodb:Update update = {
-                set: { "status": SUCCEEDED }
-            };
-            _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
-
-        } else if eventType == "payment_intent.payment_failed" {
-            json intentIdJson = check dataObject.id;
-            string intentId = intentIdJson.toString();
-            io:println("Payment failed. Intent ID: ", intentId);
-
-            mongodb:Update update = {
-                set: { "status": FAILED }
-            };
-            _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
-
-        } else if eventType == "payment_intent.canceled" {
-            json intentIdJson = check dataObject.id;
-            string intentId = intentIdJson.toString();
-            io:println("Payment intent canceled. Intent ID: ", intentId);
-
-            mongodb:Update update = {
-                set: { "status": CANCELED }
-            };
-            _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
-
-        } else {
-            io:println("Unhandled event type: ", eventType);
+        error? result = self.processWebhookEvent(webhookPayload);
+        if result is error {
+            io:println("Failed to process webhook event: ", result.message());
+            check caller->respond({ statusCode: 500, message: "Internal server error" });
+            return;
         }
 
-        check caller->respond({ statusCode: 200, message: "Webhook received" });
+        check caller->respond({ statusCode: 200, message: "Webhook processed successfully" });
+    }
+
+    private function parseWebhookPayload(http:Request req) returns StripeWebhookPayload|error {
+        json payload = check req.getJsonPayload();
+        
+        string eventType = check payload.'type;
+        json dataObject = check payload.data.'object;
+        string objectId = check dataObject.id;
+
+        // Validate that we have the required fields
+        if eventType.trim().length() == 0 || objectId.trim().length() == 0 {
+            return error("Missing required fields in webhook payload");
+        }
+
+        return {
+            eventType,
+            objectId
+        };
+    }
+
+    private final map<WebhookEventHandler> eventHandlers = {
+        [CHECKOUT_SESSION_COMPLETED]: {
+            status: SUCCEEDED,
+            idField: "stripeSessionId",
+            logMessage: "Checkout session completed"
+        },
+        [CHECKOUT_SESSION_EXPIRED]: {
+            status: EXPIRED,
+            idField: "stripeSessionId",
+            logMessage: "Checkout session expired"
+        },
+        [PAYMENT_INTENT_SUCCEEDED]: {
+            status: SUCCEEDED,
+            idField: "stripeIntentId",
+            logMessage: "Payment intent succeeded"
+        },
+        [PAYMENT_INTENT_PAYMENT_FAILED]: {
+            status: FAILED,
+            idField: "stripeIntentId",
+            logMessage: "Payment failed"
+        },
+        [PAYMENT_INTENT_CANCELED]: {
+            status: CANCELED,
+            idField: "stripeIntentId",
+            logMessage: "Payment intent canceled"
+        }
+    };
+
+    private function processWebhookEvent(StripeWebhookPayload payload) returns error? {
+        WebhookEventHandler? handler = self.eventHandlers[payload.eventType];
+        
+        if handler is WebhookEventHandler {
+            io:println(handler.logMessage, ". Object ID: ", payload.objectId);
+            return self.updatePaymentStatus(payload.objectId, handler.status, handler.idField);
+        } else {
+            io:println("Unhandled event type: ", payload.eventType);
+            return (); // No error for unhandled events
+        }
+    }
+
+    private function updatePaymentStatus(string objectId, PaymentStatus status, string idField) returns error? {
+        mongodb:Update update = {
+            set: { "status": status }
+        };
+        _ = check self.paymentCollection->updateOne({ [idField]: objectId }, update);
     }
 
 
