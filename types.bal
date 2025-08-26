@@ -29,6 +29,16 @@ public type WebhookEventHandler record {|
     string logMessage;
 |};
 
+public type PaymentOutboxEvent record {|
+    string eventType;
+    string rideId;
+    string userId;
+    string paymentUrl;
+    string amount;
+    string stripeSessionId;
+    PaymentStatus status;
+|};
+
 public enum PaymentStatus {
     PENDING = "pending",
     SUCCEEDED = "succeeded",

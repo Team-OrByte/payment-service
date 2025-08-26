@@ -4,6 +4,7 @@ import ballerinax/mongodb;
 import ballerina/io;
 import ballerinax/kafka;
 import ballerina/log;
+import payment_service.event_handler;
 
 configurable string stripeSecretKey = ?;
 configurable string successRedirectUrl = ?;
@@ -32,6 +33,13 @@ stripe:ConnectionConfig configuration = {
 };
 
 stripe:Client stripeClient = check new (configuration);
+
+// Kafka Producer for outbox events
+kafka:ProducerConfiguration producerConfiguration = {
+    clientId: "payment-service-producer",
+    acks: "all",
+    retryCount: 3
+};
 
 @http:ServiceConfig {
     cors: {
@@ -86,6 +94,21 @@ service /payment\-service on new http:Listener(9090) {
             "amount": amount,
             "stripeSessionId": checkoutSession?.id,
             "status": PENDING
+        });
+
+        // Emit payment outbox event
+        string sessionId = checkoutSession?.id is string ? <string>checkoutSession?.id : "";
+        string paymentUrl = checkoutSession?.url is string ? <string>checkoutSession?.url : "";
+        
+        //emit payment outbox event
+        check event_handler:producePaymentOutboxEvent({
+            eventType: "CREATE",
+            rideId: paymentEvent.rideId,
+            userId: paymentEvent.userId,
+            paymentUrl: paymentUrl,
+            amount: amount.toString(),
+            stripeSessionId: sessionId,
+            status: PENDING
         });
 
         Response response = { statusCode: 200, data: checkoutSession?.url };
@@ -175,8 +198,32 @@ service /payment\-service on new http:Listener(9090) {
             set: { "status": status }
         };
         _ = check self.paymentCollection->updateOne({ [idField]: objectId }, update);
+        
+        // Get the payment record to find the rideId for event emission
+        map<json>|mongodb:Error? paymentRecord = self.paymentCollection->findOne({ [idField]: objectId });
+        if paymentRecord is map<json> {
+            json? rideIdJson = paymentRecord["rideId"];
+            json? userIdJson = paymentRecord["userId"];
+            json? amountJson = paymentRecord["amount"];
+            
+            if rideIdJson is json && userIdJson is json && amountJson is json {
+                string rideId = rideIdJson.toString();
+                string userId = userIdJson.toString();
+                string amount = amountJson.toString();
+                
+                // Emit payment status update event
+                check event_handler:producePaymentOutboxEvent({
+                    eventType: "UPDATE",
+                    rideId: rideId,
+                    userId: userId,
+                    paymentUrl: "",
+                    amount: amount,
+                    stripeSessionId: objectId,
+                    status: status
+                });
+            }
+        }
     }
-
 
     // 3. Poll endpoint: frontend can check payment status
     resource function get status(string sessionId) returns Response|error {
@@ -214,45 +261,58 @@ service on kafkaListener {
     }
 
     private function create\-payment(PaymentEvent paymentEvent) returns Response|error {
-            decimal fareDecimal = check decimal:fromString(paymentEvent.fare);
-            int amount = <int>(fareDecimal * 100);
+        decimal fareDecimal = check decimal:fromString(paymentEvent.fare);
+        int amount = <int>(fareDecimal * 100);
 
-            stripe:checkout_sessions_body sessionParams = {
-                payment_method_types: ["card"],
-                line_items: [
-                    {
-                        price_data: {
-                            currency: "usd",
-                            product_data: { name: "Ride Payment" },
-                            unit_amount: amount
-                        },
-                        quantity: 1
-                    }
-                ],
-                mode: "payment",
-                success_url: successRedirectUrl,
-                cancel_url: cancelRedirectUrl
-            };
+        stripe:checkout_sessions_body sessionParams = {
+            payment_method_types: ["card"],
+            line_items: [
+                {
+                    price_data: {
+                        currency: "usd",
+                        product_data: { name: "Ride Payment" },
+                        unit_amount: amount
+                    },
+                    quantity: 1
+                }
+            ],
+            mode: "payment",
+            success_url: successRedirectUrl,
+            cancel_url: cancelRedirectUrl
+        };
 
-            stripe:Checkout\.session checkoutSession = check stripeClient->/checkout/sessions.post(sessionParams);
+        stripe:Checkout\.session checkoutSession = check stripeClient->/checkout/sessions.post(sessionParams);
 
-            // Save initial payment record (status = pending)
-            check self.paymentCollection->insertOne({
-                "userId": paymentEvent.userId,
-                "rideId": paymentEvent.rideId,
-                "amount": amount,
-                "stripeSessionId": checkoutSession?.id,
-                "status": PENDING
-            });
+        // Save initial payment record (status = pending)
+        check self.paymentCollection->insertOne({
+            "userId": paymentEvent.userId,
+            "rideId": paymentEvent.rideId,
+            "amount": amount,
+            "stripeSessionId": checkoutSession?.id,
+            "status": PENDING
+        });
 
-            Response response = { statusCode: 200, data: checkoutSession?.url };
-            return response;
-        }
+        // Emit payment outbox event
+        string sessionId = checkoutSession?.id is string ? <string>checkoutSession?.id : "";
+        string paymentUrl = checkoutSession?.url is string ? <string>checkoutSession?.url : "";
+        
+        check event_handler:producePaymentOutboxEvent({
+            eventType: "CREATE",
+            rideId: paymentEvent.rideId,
+            userId: paymentEvent.userId,
+            paymentUrl: paymentUrl,
+            amount: amount.toString(),
+            stripeSessionId: sessionId,
+            status: PENDING
+        });
+
+        Response response = { statusCode: 200, data: checkoutSession?.url };
+        return response;
+    }
 
 	remote function onConsumerRecord(kafka:Caller caller, kafka:BytesConsumerRecord[] records) returns kafka:Error? {
         
         //process the event here
-
         io:println("Received payment event: ", records[0].value);
         PaymentEvent|error paymentEvent = records[0].value.toJsonString().fromJsonWithType(PaymentEvent);
         if paymentEvent is error {
