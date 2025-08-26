@@ -2,6 +2,8 @@ import ballerina/http;
 import ballerinax/stripe;
 
 configurable string stripeSecretKey = ?;
+configurable string successRedirectUrl = ?;
+configurable string cancelRedirectUrl = ?;
 
 stripe:ConnectionConfig configuration = {
     auth: {
@@ -37,8 +39,8 @@ service /payment\-service on new http:Listener(9090) {
                 }
             ],
             mode: "payment",
-            success_url: "http://localhost:3000/success",
-            cancel_url: "http://localhost:3000/cancel"
+            success_url: successRedirectUrl,
+            cancel_url: cancelRedirectUrl
         };
 
         stripe:Checkout\.session|error checkoutSession = stripeClient->/checkout/sessions.post(sessionParams);
