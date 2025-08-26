@@ -16,6 +16,7 @@ services:
   payment-service:
     build: .
     container_name: payment_service
+    image: payment-service-payment-service:latest
     restart: unless-stopped
     depends_on:
       payment_service_mongodb:

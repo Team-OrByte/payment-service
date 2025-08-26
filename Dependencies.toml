@@ -332,6 +332,19 @@ modules = [
 
 [[package]]
 org = "ballerinax"
+name = "mongodb"
+version = "5.2.1"
+dependencies = [
+	{org = "ballerina", name = "crypto"},
+	{org = "ballerina", name = "jballerina.java"},
+	{org = "ballerina", name = "log"}
+]
+modules = [
+	{org = "ballerinax", packageName = "mongodb", moduleName = "mongodb"}
+]
+
+[[package]]
+org = "ballerinax"
 name = "stripe"
 version = "2.0.0"
 dependencies = [
@@ -356,6 +369,7 @@ dependencies = [
 	{org = "ballerina", name = "io"},
 	{org = "ballerina", name = "test"},
 	{org = "ballerinai", name = "observe"},
+	{org = "ballerinax", name = "mongodb"},
 	{org = "ballerinax", name = "stripe"}
 ]
 modules = [

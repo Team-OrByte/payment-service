@@ -1,6 +1,7 @@
 import ballerina/http;
 import ballerinax/stripe;
 import ballerinax/mongodb;
+import ballerina/io;
 
 configurable string stripeSecretKey = ?;
 configurable string successRedirectUrl = ?;
@@ -15,10 +16,7 @@ configurable string collection = ?;
 
 final mongodb:Client mongoClient = check new ({
     connection: {
-        serverAddress: {
-            host,
-            port
-        },
+        serverAddress: { host, port },
         auth: <mongodb:ScramSha256AuthCredential>{
             username,
             password,
@@ -28,9 +26,7 @@ final mongodb:Client mongoClient = check new ({
 });
 
 stripe:ConnectionConfig configuration = {
-    auth: {
-        token: stripeSecretKey
-    }
+    auth: { token: stripeSecretKey }
 };
 
 stripe:Client stripeClient = check new (configuration);
@@ -38,30 +34,33 @@ stripe:Client stripeClient = check new (configuration);
 @http:ServiceConfig {
     cors: {
         allowOrigins: ["*"],
-        allowMethods: ["POST", "PUT", "GET", "POST", "OPTIONS"],
+        allowMethods: ["POST", "PUT", "GET", "OPTIONS"],
         allowHeaders: ["Content-Type", "Access-Control-Allow-Origin", "X-Service-Name"]
     }
 }
 service /payment\-service on new http:Listener(9090) {
 
-    private final mongodb:Database moviesDb;
+    private final mongodb:Database paymentsDb;
+    private final mongodb:Collection paymentCollection;
 
     function init() returns error? {
-        self.moviesDb = check mongoClient->getDatabase(collection);
+        self.paymentsDb = check mongoClient->getDatabase(database);
+        self.paymentCollection = check self.paymentsDb->getCollection(collection);
     }
 
-    resource function get create\-payment(http:Request request) returns Response|error {
-        // Create a checkout session for frontend integration
+    // 1. Create Checkout Session
+    resource function post create\-payment(PaymentEvent paymentEvent) returns Response|error {
+        decimal fareDecimal = check decimal:fromString(paymentEvent.fare);
+        int amount = <int>(fareDecimal * 100);
+
         stripe:checkout_sessions_body sessionParams = {
             payment_method_types: ["card"],
             line_items: [
                 {
                     price_data: {
                         currency: "usd",
-                        product_data: {
-                            name: "Sample Product"
-                        },
-                        unit_amount: 500 // $5.00 in cents
+                        product_data: { name: "Ride Payment" },
+                        unit_amount: amount
                     },
                     quantity: 1
                 }
@@ -71,51 +70,113 @@ service /payment\-service on new http:Listener(9090) {
             cancel_url: cancelRedirectUrl
         };
 
-        stripe:Checkout\.session|error checkoutSession = stripeClient->/checkout/sessions.post(sessionParams);
-        
+        stripe:Checkout\.session|error checkoutSession =
+            stripeClient->/checkout/sessions.post(sessionParams);
+
         if checkoutSession is error {
             return error("Failed to create checkout session: " + checkoutSession.message());
         }
-        
-        // Return the checkout URL for frontend
 
-        Response response = {
-            statusCode: 200,
-            data: checkoutSession?.url
-        };
-        
+        // Save initial payment record (status = pending)
+        check self.paymentCollection->insertOne({
+            "userId": paymentEvent.userId,
+            "amount": amount,
+            "stripeSessionId": checkoutSession?.id,
+            "status": "pending"
+        });
+
+        Response response = { statusCode: 200, data: checkoutSession?.url };
         return response;
     }
 
-    resource function get create\-payment\-intent(http:Request request) returns Response|error {
-        stripe:payment_intents_body params = {
-            amount: 500, // $5.00 in cents
-            currency: "usd",
-            capture_method: "automatic",
-            confirmation_method: "automatic"
-        };
+    // 2. Stripe Webhook (actual status comes here)
+    resource function post webhook(http:Caller caller, http:Request req) returns error? {
+        json|error payload = req.getJsonPayload();
+        if payload is error {
+            check caller->respond({ statusCode: 400, message: "Invalid payload" });
+            return;
+        }
 
-        stripe:Payment_intent|error paymentIntent = stripeClient->/payment_intents.post(params);
-        
-        if paymentIntent is error {
-            return error("Failed to create payment intent: " + paymentIntent.message());
+        io:println("Webhook event received: ", payload.toJsonString());
+
+        json eventTypeJson = check payload.'type;
+        string eventType = eventTypeJson.toString();
+
+        json dataJson = check payload.data;
+        json dataObject = check dataJson.'object;
+
+        if eventType == "checkout.session.completed" {
+            json sessionIdJson = check dataObject.id;
+            string sessionId = sessionIdJson.toString();
+            io:println("Checkout session completed. Session ID: ", sessionId);
+
+            mongodb:Update update = {
+                set: { "status": "succeeded" }
+            };
+            _ = check self.paymentCollection->updateOne({ "stripeSessionId": sessionId }, update);
+
+        } else if eventType == "checkout.session.expired" {
+            json sessionIdJson = check dataObject.id;
+            string sessionId = sessionIdJson.toString();
+            io:println("Checkout session expired. Session ID: ", sessionId);
+
+            mongodb:Update update = {
+                set: { "status": "expired" }
+            };
+            _ = check self.paymentCollection->updateOne({ "stripeSessionId": sessionId }, update);
+
+        } else if eventType == "payment_intent.succeeded" {
+            json intentIdJson = check dataObject.id;
+            string intentId = intentIdJson.toString();
+            io:println("Payment intent succeeded. Intent ID: ", intentId);
+
+            mongodb:Update update = {
+                set: { "status": "succeeded" }
+            };
+            _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
+
+        } else if eventType == "payment_intent.payment_failed" {
+            json intentIdJson = check dataObject.id;
+            string intentId = intentIdJson.toString();
+            io:println("Payment failed. Intent ID: ", intentId);
+
+            mongodb:Update update = {
+                set: { "status": "failed" }
+            };
+            _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
+
+        } else if eventType == "payment_intent.canceled" {
+            json intentIdJson = check dataObject.id;
+            string intentId = intentIdJson.toString();
+            io:println("Payment intent canceled. Intent ID: ", intentId);
+
+            mongodb:Update update = {
+                set: { "status": "canceled" }
+            };
+            _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
+
+        } else {
+            io:println("Unhandled event type: ", eventType);
+        }
+
+        check caller->respond({ statusCode: 200, message: "Webhook received" });
+    }
+
+
+    // 3. Poll endpoint: frontend can check payment status
+    resource function get status(string sessionId) returns Response|error {
+        map<json>|mongodb:Error? result = self.paymentCollection->findOne({ "stripeSessionId": sessionId });
+        if result is error || result is () {
+            return { statusCode: 404, data: "Payment not found" };
         }
         
-        // Return client secret for frontend Elements integration
-
-        Response response = {
-            statusCode: 200,
-            data: paymentIntent?.client_secret
-        };
-        
-        return response;
+        json statusJson = result["status"];
+        string status = statusJson.toString();
+        return { statusCode: 200, data: status };
     }
 
+    // 4. Health Check
     resource function get health(http:Request request) returns Response {
-        Response response = {
-            statusCode: 200
-        };
-        
-        return response;
+        return { statusCode: 200, data: "OK" };
     }
 }
