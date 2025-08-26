@@ -82,7 +82,7 @@ service /payment\-service on new http:Listener(9090) {
             "userId": paymentEvent.userId,
             "amount": amount,
             "stripeSessionId": checkoutSession?.id,
-            "status": "pending"
+            "status": PENDING
         });
 
         Response response = { statusCode: 200, data: checkoutSession?.url };
@@ -111,7 +111,7 @@ service /payment\-service on new http:Listener(9090) {
             io:println("Checkout session completed. Session ID: ", sessionId);
 
             mongodb:Update update = {
-                set: { "status": "succeeded" }
+                set: { "status": SUCCEEDED }
             };
             _ = check self.paymentCollection->updateOne({ "stripeSessionId": sessionId }, update);
 
@@ -121,7 +121,7 @@ service /payment\-service on new http:Listener(9090) {
             io:println("Checkout session expired. Session ID: ", sessionId);
 
             mongodb:Update update = {
-                set: { "status": "expired" }
+                set: { "status": EXPIRED }
             };
             _ = check self.paymentCollection->updateOne({ "stripeSessionId": sessionId }, update);
 
@@ -131,7 +131,7 @@ service /payment\-service on new http:Listener(9090) {
             io:println("Payment intent succeeded. Intent ID: ", intentId);
 
             mongodb:Update update = {
-                set: { "status": "succeeded" }
+                set: { "status": SUCCEEDED }
             };
             _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
 
@@ -141,7 +141,7 @@ service /payment\-service on new http:Listener(9090) {
             io:println("Payment failed. Intent ID: ", intentId);
 
             mongodb:Update update = {
-                set: { "status": "failed" }
+                set: { "status": FAILED }
             };
             _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
 
@@ -151,7 +151,7 @@ service /payment\-service on new http:Listener(9090) {
             io:println("Payment intent canceled. Intent ID: ", intentId);
 
             mongodb:Update update = {
-                set: { "status": "canceled" }
+                set: { "status": CANCELED }
             };
             _ = check self.paymentCollection->updateOne({ "stripeIntentId": intentId }, update);
 

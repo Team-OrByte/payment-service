@@ -10,3 +10,10 @@ public type PaymentEvent record {|
     string fare;
 |};
 
+public enum PaymentStatus {
+    PENDING = "pending",
+    SUCCEEDED = "succeeded",
+    FAILED = "failed",
+    CANCELED = "canceled",
+    EXPIRED = "expired"
+};
