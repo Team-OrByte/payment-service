@@ -80,6 +80,7 @@ service /payment\-service on new http:Listener(9090) {
         // Save initial payment record (status = pending)
         check self.paymentCollection->insertOne({
             "userId": paymentEvent.userId,
+            "rideId": paymentEvent.rideId,
             "amount": amount,
             "stripeSessionId": checkoutSession?.id,
             "status": PENDING
