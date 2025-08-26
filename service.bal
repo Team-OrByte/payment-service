@@ -2,6 +2,8 @@ import ballerina/http;
 import ballerinax/stripe;
 import ballerinax/mongodb;
 import ballerina/io;
+import ballerinax/kafka;
+import ballerina/log;
 
 configurable string stripeSecretKey = ?;
 configurable string successRedirectUrl = ?;
@@ -192,4 +194,82 @@ service /payment\-service on new http:Listener(9090) {
     resource function get health(http:Request request) returns Response {
         return { statusCode: 200, data: "OK" };
     }
+}
+
+kafka:ConsumerConfiguration consumerConfiguration = {
+    groupId: "payments",
+    topics: ["payment-events"],
+    pollingInterval: 1,
+    autoCommit: false
+};
+
+listener kafka:Listener kafkaListener = new (kafka:DEFAULT_URL,consumerConfiguration);
+service on kafkaListener {
+    private final mongodb:Database paymentsDb;
+    private final mongodb:Collection paymentCollection;
+
+    function init() returns error? {
+        self.paymentsDb = check mongoClient->getDatabase(database);
+        self.paymentCollection = check self.paymentsDb->getCollection(collection);
+    }
+
+    private function create\-payment(PaymentEvent paymentEvent) returns Response|error {
+            decimal fareDecimal = check decimal:fromString(paymentEvent.fare);
+            int amount = <int>(fareDecimal * 100);
+
+            stripe:checkout_sessions_body sessionParams = {
+                payment_method_types: ["card"],
+                line_items: [
+                    {
+                        price_data: {
+                            currency: "usd",
+                            product_data: { name: "Ride Payment" },
+                            unit_amount: amount
+                        },
+                        quantity: 1
+                    }
+                ],
+                mode: "payment",
+                success_url: successRedirectUrl,
+                cancel_url: cancelRedirectUrl
+            };
+
+            stripe:Checkout\.session checkoutSession = check stripeClient->/checkout/sessions.post(sessionParams);
+
+            // Save initial payment record (status = pending)
+            check self.paymentCollection->insertOne({
+                "userId": paymentEvent.userId,
+                "rideId": paymentEvent.rideId,
+                "amount": amount,
+                "stripeSessionId": checkoutSession?.id,
+                "status": PENDING
+            });
+
+            Response response = { statusCode: 200, data: checkoutSession?.url };
+            return response;
+        }
+
+	remote function onConsumerRecord(kafka:Caller caller, kafka:BytesConsumerRecord[] records) returns kafka:Error? {
+        
+        //process the event here
+
+        io:println("Received payment event: ", records[0].value);
+        PaymentEvent|error paymentEvent = records[0].value.toJsonString().fromJsonWithType(PaymentEvent);
+        if paymentEvent is error {
+            io:println("Failed to parse payment event: ", paymentEvent.message());
+            return;
+        }
+        Response|error result = self.create\-payment(<PaymentEvent>paymentEvent);
+        if result is error {
+            io:println("Failed to create payment: ", result.message());
+            return;
+        }
+        io:println("Payment created successfully");
+
+        kafka:Error? commitResult = caller->commit();
+
+        if commitResult is kafka:Error {
+            log:printError("Error occurred while committing the offsets for the consumer ", 'error = commitResult);
+        }
+	}
 }
