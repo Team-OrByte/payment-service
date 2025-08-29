@@ -9,8 +9,8 @@ COPY modules/ modules/
 
 RUN bal build
 
-# Use Java runtime image for running the compiled JAR
-FROM openjdk:21-jre-slim
+# Use Eclipse Temurin Java runtime image for running the compiled JAR
+FROM eclipse-temurin:17-jre
 
 WORKDIR /app
 
