@@ -22,7 +22,7 @@ services:
       payment_service_mongodb:
         condition: service_started
     ports:
-      - '8090:8090'
+      - '9091:9091'
     volumes:
       - ./Config.toml:/app/Config.toml
       - ./logs:/app/logs
@@ -31,7 +31,7 @@ services:
       BAL_CONFIG_FILES: /app/Config.toml
     healthcheck:
       test:
-        ['CMD', 'curl', '-f', 'http://localhost:8090/payment-service/health']
+        ['CMD', 'curl', '-f', 'http://localhost:9091/payment-service/health']
       interval: 30s
       timeout: 10s
       retries: 3
