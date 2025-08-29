@@ -3,12 +3,14 @@ FROM ballerina/ballerina:2201.12.7 AS builder
 WORKDIR /app
 
 COPY Ballerina.toml .
+COPY Dependencies.toml .
 COPY *.bal .
+COPY modules/ modules/
 
 RUN bal build
 
-# Use Debian-based runtime
-FROM eclipse-temurin:21-jre
+# Use Ballerina runtime image which includes all necessary native libraries
+FROM ballerina/ballerina:2201.12.7-runtime
 
 WORKDIR /app
 
