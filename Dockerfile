@@ -2,16 +2,14 @@ FROM ballerina/ballerina:2201.12.7 AS builder
 
 WORKDIR /app
 
-# Copy only Ballerina.toml first to cache dependencies
+# Copy only the dependency files first to leverage Docker cache
 COPY Ballerina.toml .
+COPY Dependencies.toml . 
 
-# Run dependency resolution before copying source code
-RUN bal pull
-
-# Copy source code (all files except Dependencies.toml)
+# Copy the rest of the source code
 COPY . .
 
-# Run build (Ballerina will recreate Dependencies.toml)
+# Build (this will auto-pull dependencies)
 RUN bal build
 
 # Use Eclipse Temurin Java runtime image for running the compiled JAR
