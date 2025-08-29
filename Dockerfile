@@ -9,8 +9,8 @@ COPY modules/ modules/
 
 RUN bal build
 
-# Use Ballerina runtime image which includes all necessary native libraries
-FROM ballerina/ballerina:2201.12.7-runtime
+# Use Java runtime image for running the compiled JAR
+FROM openjdk:21-jre-slim
 
 WORKDIR /app
 
