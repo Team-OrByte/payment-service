@@ -4,12 +4,11 @@ WORKDIR /app
 
 COPY Ballerina.toml .
 COPY *.bal .
-# COPY persist/ persist/
-# COPY modules/ modules/
 
 RUN bal build
 
-FROM eclipse-temurin:21-jre-alpine
+# Use Debian-based runtime
+FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
@@ -17,6 +16,6 @@ COPY --from=builder /app/target/bin/payment_service.jar .
 
 RUN mkdir -p logs
 
-EXPOSE 8090
+EXPOSE 9091
 
 CMD ["java", "-jar", "payment_service.jar"]

@@ -21,21 +21,42 @@ services:
     depends_on:
       payment_service_mongodb:
         condition: service_started
+      kafka:
+        condition: service_started
     ports:
-      - '8090:8090'
+      - '9091:9091'
     volumes:
       - ./Config.toml:/app/Config.toml
       - ./logs:/app/logs
       - ./public.crt:/app/public.crt
     environment:
       BAL_CONFIG_FILES: /app/Config.toml
-    healthcheck:
-      test:
-        ['CMD', 'curl', '-f', 'http://localhost:8090/payment-service/health']
-      interval: 30s
-      timeout: 10s
-      retries: 3
+
+  kafka:
+    image: bitnami/kafka:latest
+    container_name: kafka_server
+    restart: always
+    ports:
+      - '9094:9094'
+    volumes:
+      - kafka_data:/bitnami/kafka
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - ALLOW_PLAINTEXT_LISTENER=yes
 
 volumes:
   payment_mongodb_data:
   payment_service_logs:
+  kafka_data:
+  zookeeper_data:
+  kafka_logs:
