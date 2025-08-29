@@ -18,6 +18,7 @@ configurable string username = ?;
 configurable string password = ?;
 configurable string database = ?;
 configurable string collection = ?;
+configurable string kafkaBootstrapServers = ?;
 
 final mongodb:Client mongoClient = check new ({
     connection: {
@@ -43,7 +44,7 @@ kafka:ConsumerConfiguration consumerConfiguration = {
     autoCommit: false
 };
 
-listener kafka:Listener kafkaListener = new (kafka:DEFAULT_URL,consumerConfiguration);
+listener kafka:Listener kafkaListener = new (kafkaBootstrapServers,consumerConfiguration);
 service on kafkaListener {
     private final mongodb:Database paymentsDb;
     private final mongodb:Collection paymentCollection;
@@ -114,9 +115,27 @@ service on kafkaListener {
         
         //process the event here
         io:println("Received payment event: ", records[0].value);
-        PaymentEvent|error paymentEvent = records[0].value.toJsonString().fromJsonWithType(PaymentEvent);
+        
+        // Convert byte array to string first, then parse as JSON
+        string|error jsonString = string:fromBytes(records[0].value);
+        if jsonString is error {
+            io:println("Failed to convert bytes to string: ", jsonString.message());
+            return;
+        }
+        
+        io:println("Parsed JSON string: ", jsonString);
+        
+        // Parse to JSON first, then convert to PaymentEvent
+        json|error jsonData = jsonString.fromJsonString();
+        if jsonData is error {
+            io:println("Failed to parse JSON: ", jsonData.message());
+            return;
+        }
+        
+        PaymentEvent|error paymentEvent = jsonData.fromJsonWithType(PaymentEvent);
         if paymentEvent is error {
             io:println("Failed to parse payment event: ", paymentEvent.message());
+            io:println("JSON data: ", jsonData);
             return;
         }
         Response|error result = self.create\-payment(<PaymentEvent>paymentEvent);

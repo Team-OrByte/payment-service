@@ -21,6 +21,8 @@ services:
     depends_on:
       payment_service_mongodb:
         condition: service_started
+      kafka:
+        condition: service_started
     ports:
       - '9091:9091'
     volumes:
@@ -29,12 +31,6 @@ services:
       - ./public.crt:/app/public.crt
     environment:
       BAL_CONFIG_FILES: /app/Config.toml
-    healthcheck:
-      test:
-        ['CMD', 'curl', '-f', 'http://localhost:9091/payment-service/health']
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   kafka:
     image: bitnami/kafka:latest
