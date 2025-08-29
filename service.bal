@@ -4,7 +4,11 @@ import ballerinax/mongodb;
 import ballerina/io;
 import ballerinax/kafka;
 import ballerina/log;
-import payment_service.event_handler;
+// import payment_service.event_handler;
+import ballerina/websocket;
+
+// Global map to store WebSocket connections by user ID
+map<websocket:Caller> wsConnections = {};
 
 configurable string stripeSecretKey = ?;
 configurable string successRedirectUrl = ?;
@@ -96,20 +100,24 @@ service /payment\-service on new http:Listener(9090) {
             "status": PENDING
         });
 
-        // Emit payment outbox event
-        string sessionId = checkoutSession?.id is string ? <string>checkoutSession?.id : "";
         string paymentUrl = checkoutSession?.url is string ? <string>checkoutSession?.url : "";
-        
-        //emit payment outbox event
-        check event_handler:producePaymentOutboxEvent({
-            eventType: "CREATE",
-            rideId: paymentEvent.rideId,
-            userId: paymentEvent.userId,
-            paymentUrl: paymentUrl,
-            amount: amount.toString(),
-            stripeSessionId: sessionId,
-            status: PENDING
-        });
+
+        // Send payment URL to connected WebSocket client
+        websocket:Caller? wsClient = wsConnections[paymentEvent.userId];
+        if wsClient is websocket:Caller {
+            json paymentMessage = {
+                "type": "payment_url",
+                "rideId": paymentEvent.rideId,
+                "paymentUrl": paymentUrl,
+                "status": "pending"
+            };
+            websocket:Error? sendResult = wsClient->writeMessage(paymentMessage);
+            if sendResult is websocket:Error {
+                io:println("Failed to send payment URL to WebSocket client: ", sendResult.message());
+            }
+        } else {
+            io:println("No WebSocket connection found for user: ", paymentEvent.userId);
+        }
 
         Response response = { statusCode: 200, data: checkoutSession?.url };
         return response;
@@ -209,18 +217,23 @@ service /payment\-service on new http:Listener(9090) {
             if rideIdJson is json && userIdJson is json && amountJson is json {
                 string rideId = rideIdJson.toString();
                 string userId = userIdJson.toString();
-                string amount = amountJson.toString();
-                
-                // Emit payment status update event
-                check event_handler:producePaymentOutboxEvent({
-                    eventType: "UPDATE",
-                    rideId: rideId,
-                    userId: userId,
-                    paymentUrl: "",
-                    amount: amount,
-                    stripeSessionId: objectId,
-                    status: status
-                });
+
+                // Send payment status update to connected WebSocket client
+                websocket:Caller? wsClient = wsConnections[userId];
+                if wsClient is websocket:Caller {
+                    json statusMessage = {
+                        "type": "payment_status_update",
+                        "rideId": rideId,
+                        "status": status,
+                        "stripeSessionId": objectId
+                    };
+                    websocket:Error? sendResult = wsClient->writeMessage(statusMessage);
+                    if sendResult is websocket:Error {
+                        io:println("Failed to send payment status update to WebSocket client: ", sendResult.message());
+                    }
+                } else {
+                    io:println("No WebSocket connection found for user: ", userId);
+                }
             }
         }
     }
@@ -293,18 +306,25 @@ service on kafkaListener {
         });
 
         // Emit payment outbox event
-        string sessionId = checkoutSession?.id is string ? <string>checkoutSession?.id : "";
+        // string sessionId = checkoutSession?.id is string ? <string>checkoutSession?.id : "";
         string paymentUrl = checkoutSession?.url is string ? <string>checkoutSession?.url : "";
-        
-        check event_handler:producePaymentOutboxEvent({
-            eventType: "CREATE",
-            rideId: paymentEvent.rideId,
-            userId: paymentEvent.userId,
-            paymentUrl: paymentUrl,
-            amount: amount.toString(),
-            stripeSessionId: sessionId,
-            status: PENDING
-        });
+
+        // Send payment URL to connected WebSocket client
+        websocket:Caller? wsClient = wsConnections[paymentEvent.userId];
+        if wsClient is websocket:Caller {
+            json paymentMessage = {
+                "type": "payment_url",
+                "rideId": paymentEvent.rideId,
+                "paymentUrl": paymentUrl,
+                "status": "pending"
+            };
+            websocket:Error? sendResult = wsClient->writeMessage(paymentMessage);
+            if sendResult is websocket:Error {
+                io:println("Failed to send payment URL to WebSocket client: ", sendResult.message());
+            }
+        } else {
+            io:println("No WebSocket connection found for user: ", paymentEvent.userId);
+        }
 
         Response response = { statusCode: 200, data: checkoutSession?.url };
         return response;
@@ -332,4 +352,83 @@ service on kafkaListener {
             log:printError("Error occurred while committing the offsets for the consumer ", 'error = commitResult);
         }
 	}
+}
+
+service /basic/ws on new websocket:Listener(9091) {
+   resource function get .() returns websocket:Service|websocket:Error {
+       return new WsService();
+   }
+}
+
+service class WsService {
+    *websocket:Service;
+    
+    private string? userId = ();
+    
+    remote function onOpen(websocket:Caller caller) returns error? {
+        io:println("Opened a WebSocket connection");
+        check caller->writeMessage("Connected! Please send your user ID to register for payment notifications.");
+    }
+    
+    remote function onMessage(websocket:Caller caller, json data) returns websocket:Error? {
+        io:println("Received WebSocket message: ", data);
+        
+        // Check if this is a user ID registration message
+        if data is map<json> {
+            json? userIdJson = data["userId"];
+            json? typeJson = data["type"];
+            
+            if typeJson is string && typeJson == "register" && userIdJson is string {
+                string userId = userIdJson.toString();
+                self.userId = userId;
+                wsConnections[userId] = caller;
+                io:println("Registered WebSocket connection for user: ", userId);
+                
+                json response = {
+                    "type": "registration_success",
+                    "message": "Successfully registered for payment notifications",
+                    "userId": userId
+                };
+                check caller->writeMessage(response);
+            } else {
+                json response = {
+                    "type": "error",
+                    "message": "Invalid message format. Send {\"type\": \"register\", \"userId\": \"your_user_id\"}"
+                };
+                check caller->writeMessage(response);
+            }
+        }
+    }
+    
+    remote function onPing(websocket:Caller caller, byte[] data) returns error? {
+        io:println("Ping received");
+        check caller->pong(data);
+    }
+ 
+    remote function onPong(websocket:Caller caller, byte[] data) {
+        io:println("Pong received");
+    }
+
+    remote function onIdleTimeout(websocket:Caller caller) {
+        io:println("WebSocket connection timed out");
+        self.cleanupConnection();
+    }
+
+    remote function onClose(websocket:Caller caller, int statusCode, string reason) {
+        io:println(string `Client closed connection with ${statusCode} because of ${reason}`);
+        self.cleanupConnection();
+    }
+
+    remote function onError(websocket:Caller caller, error err) {
+        io:println("WebSocket error: ", err.message());
+        self.cleanupConnection();
+    }
+    
+    private function cleanupConnection() {
+        if self.userId is string {
+            string userId = <string>self.userId;
+            _ = wsConnections.remove(userId);
+            io:println("Removed WebSocket connection for user: ", userId);
+        }
+    }
 }
