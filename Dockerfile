@@ -4,7 +4,6 @@ WORKDIR /app
 
 # Copy only the dependency files first to leverage Docker cache
 COPY Ballerina.toml .
-COPY Dependencies.toml . 
 
 # Copy the rest of the source code
 COPY . .
