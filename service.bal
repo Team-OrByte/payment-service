@@ -18,7 +18,6 @@ configurable string username = ?;
 configurable string password = ?;
 configurable string database = ?;
 configurable string collection = ?;
-configurable string kafkaBootstrapServers = ?;
 
 final mongodb:Client mongoClient = check new ({
     connection: {
@@ -43,6 +42,8 @@ kafka:ConsumerConfiguration consumerConfiguration = {
     pollingInterval: 1,
     autoCommit: false
 };
+
+configurable string kafkaBootstrapServers = ?;
 
 listener kafka:Listener kafkaListener = new (kafkaBootstrapServers,consumerConfiguration);
 service on kafkaListener {
