@@ -64,7 +64,7 @@ service on kafkaListener {
             line_items: [
                 {
                     price_data: {
-                        currency: "usd",
+                        currency: "lkr",
                         product_data: { name: "Ride Payment" },
                         unit_amount: amount
                     },
