@@ -57,8 +57,8 @@ service on kafkaListener {
 
     private function create\-payment(PaymentEvent paymentEvent) returns Response|error {
         decimal fareDecimal = check decimal:fromString(paymentEvent.fare);
-        decimal lkrDecimal = fareDecimal/3020;
-        int amount = <int>(lkrDecimal * 1000);
+        decimal usdDecimal = fareDecimal/3020.0;
+        int amount = <int>(usdDecimal * 1000);
 
         stripe:checkout_sessions_body sessionParams = {
             payment_method_types: ["card"],
