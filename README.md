@@ -4,7 +4,7 @@ A Ballerina-based payment processing microservice that integrates with Stripe fo
 
 ## Build & Deployment Status
 
-[![CI](https://github.com/Team-OrByte/payment-service/actions/workflows/automation.yaml/badge.svg)](https://github.com/Team-OrByte/payment-service/actions/workflows/automation.yaml)
+[![CI](https://github.com/Team-OrByte/payment-service/actions/workflows/automation.yaml/badge.svg?branch=main&event=status)](https://github.com/Team-OrByte/payment-service/actions/workflows/automation.yaml)
 [![Docker Image](https://img.shields.io/badge/docker-thetharz%2Forbyte__payment__service-blue)](https://hub.docker.com/r/thetharz/orbyte_payment_service)
 
 ## How Ballerina is Used
