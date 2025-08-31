@@ -1,11 +1,9 @@
 # Payment Service
 
-A Ballerina-based payment processing microservice that integrates with Stripe for payment processing, Kafka for event streaming, MongoDB for data persistence, and WebSocket for real-time notifications. This service handles ride payment transactions within a ride-hailing application ecosystem.
-
-## Build & Deployment Status
-
-[![CI](https://github.com/Team-OrByte/payment-service/actions/workflows/automation.yaml/badge.svg?branch=main&event=status)](https://github.com/Team-OrByte/payment-service/actions/workflows/automation.yaml)
+[![CI](https://github.com/Team-OrByte/payment-service/actions/workflows/automation.yaml/badge.svg)](https://github.com/Team-OrByte/payment-service/actions/workflows/automation.yaml)
 [![Docker Image](https://img.shields.io/badge/docker-thetharz%2Forbyte__payment__service-blue)](https://hub.docker.com/r/thetharz/orbyte_payment_service)
+
+A Ballerina-based payment processing microservice that integrates with Stripe for payment processing, Kafka for event streaming, MongoDB for data persistence, and WebSocket for real-time notifications. This service handles ride payment transactions within a ride-hailing application ecosystem.
 
 ## How Ballerina is Used
 
